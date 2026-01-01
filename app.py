@@ -1,8 +1,8 @@
 import yfinance as yf
 import pandas as pd
-import ta
 import plotly.graph_objects as go
 import ccxt
+import pandas_ta as ta
 
 symbol = "LULU"
 df = yf.download(symbol, start="2022-01-01")
