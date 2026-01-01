@@ -19,6 +19,8 @@ if df.empty or 'Close' not in df.columns:
 
 df.dropna(inplace=True)
 
+# Fixed dropna to avoid KeyError
+
 if df.empty:
     st.error("No hay datos suficientes después de limpiar NaN.")
     st.stop()
