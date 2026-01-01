@@ -11,7 +11,17 @@ symbol = st.text_input("Símbolo de la acción", "AAPL")
 start_date = st.date_input("Fecha de inicio", value=pd.to_datetime("2022-01-01"))
 
 df = yf.download(symbol, start=start_date)
-df.dropna(subset=['Close'], inplace=True)
+
+if df.empty or 'Close' not in df.columns:
+    st.error(f"No se pudieron obtener datos válidos para el símbolo '{symbol}'. Verifica el símbolo.")
+    st.write(f"DataFrame vacío: {df.empty}, Columnas: {list(df.columns)}")
+    st.stop()
+
+df.dropna(inplace=True)
+
+if df.empty:
+    st.error("No hay datos suficientes después de limpiar NaN.")
+    st.stop()
 
 if df.empty:
     st.error("No se pudieron obtener datos para el símbolo especificado.")
