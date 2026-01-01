@@ -1,6 +1,5 @@
 import streamlit as st
 import yfinance as yf
-import ta
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
@@ -28,13 +27,21 @@ if df.empty:
     st.error("No hay suficientes datos después de limpiar NaN.")
     st.stop()
 
+def calculate_rsi(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).ewm(alpha=1/period).mean()
+    loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/period).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
 # --- Calcular indicadores técnicos ---
-close_series = df['Close']
-df['SMA_20'] = ta.trend.sma_indicator(close_series, window=20)
-df['EMA_12'] = ta.trend.ema_indicator(close_series, window=12)
-df['RSI'] = ta.momentum.rsi(close_series, window=14)
-df['BB_upper'] = ta.volatility.bollinger_hband(close_series, window=20)
-df['BB_lower'] = ta.volatility.bollinger_lband(close_series, window=20)
+df['SMA_20'] = df['Close'].rolling(window=20).mean()
+df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()
+df['RSI'] = calculate_rsi(df['Close'], period=14)
+rolling_mean = df['Close'].rolling(window=20).mean()
+rolling_std = df['Close'].rolling(window=20).std()
+df['BB_upper'] = rolling_mean + 2 * rolling_std
+df['BB_lower'] = rolling_mean - 2 * rolling_std
 
 # --- Soportes y resistencias (clásico) ---
 def detect_support_resistance(data, window=5):
@@ -63,13 +70,13 @@ fig_price.add_trace(go.Scatter(x=df.index, y=df['BB_upper'], line=dict(color='gr
 fig_price.add_trace(go.Scatter(x=df.index, y=df['BB_lower'], line=dict(color='gray', dash='dot'), name='Bollinger Inferior'))
 
 # Añadir soportes y resistencias
-for s in supports[-10:]:  # Últimos 10 soportes
+for s in supports.tail(10).values:  # Últimos 10 soportes
     fig_price.add_hline(y=s, line=dict(color='green', dash='dash'), opacity=0.5)
-for r in resistances[-10:]:  # Últimas 10 resistencias
+for r in resistances.tail(10).values:  # Últimas 10 resistencias
     fig_price.add_hline(y=r, line=dict(color='red', dash='dash'), opacity=0.5)
 
 fig_price.update_layout(title=f"Análisis Técnico de {symbol}", xaxis_title="Fecha", yaxis_title="Precio")
-st.plotly_chart(fig_price, use_container_width=True)
+st.plotly_chart(fig_price, width='stretch')
 
 # --- Análisis Fundamental ---
 st.subheader("Análisis Fundamental")
@@ -128,7 +135,7 @@ def calcular_precios_justos(symbol):
         st.warning(f"Error al obtener datos para {symbol}: {e}")
         return None, None, None
 
-    shares_out = info.get('sharesOutstanding')
+    shares_out = float(info.get('sharesOutstanding', 0))
     if not shares_out or shares_out <= 0:
         return None, None, None
 
@@ -137,7 +144,7 @@ def calcular_precios_justos(symbol):
     try:
         fcf_series = cashflow[cashflow['type'] == 'Free Cash Flow']['FreeCashFlow'].dropna()
         if len(fcf_series) > 0:
-            fcf = fcf_series.iloc[0]  # Último FCF anual
+            fcf = float(fcf_series.iloc[0])  # Último FCF anual
     except:
         pass
 
@@ -161,7 +168,7 @@ def calcular_precios_justos(symbol):
             fair_value_dcf = None
 
     # --- 2. DDM (Dividend Discount Model) ---
-    dividend = info.get('dividendRate')
+    dividend = float(info.get('dividendRate', 0))
     fair_value_ddm = None
     if dividend and dividend > 0:
         try:
@@ -173,8 +180,8 @@ def calcular_precios_justos(symbol):
             fair_value_ddm = None
 
     # --- 3. P/E relativo (usar promedio histórico de P/E) ---
-    trailing_pe = key_stats.get('trailingPE')
-    eps = info.get('epsTrailingTwelveMonths')
+    trailing_pe = float(key_stats.get('trailingPE', 0))
+    eps = float(info.get('epsTrailingTwelveMonths', 0))
     fair_value_pe = None
     if trailing_pe and eps:
         # Suponemos que el "precio justo" es cuando la acción vuelve a su P/E histórico promedio
@@ -186,9 +193,7 @@ def calcular_precios_justos(symbol):
 
     return fair_value_dcf, fair_value_ddm, fair_value_pe
 
-
-
-    st.subheader("Precio Justo Estimado (Valor Intrínseco)")
+st.subheader("Precio Justo Estimado (Valor Intrínseco)")
 
 # Instalar yahooquery si no lo tienes: pip install yahooquery
 try:
@@ -236,13 +241,77 @@ try:
             marker_color=['blue', 'green', 'orange', 'red'][:len(fair_df)]
         ))
         fig_fair.update_layout(title="Comparación: Precio Actual vs. Precio Justo", yaxis_title="USD")
-        st.plotly_chart(fig_fair, use_container_width=True)
+        st.plotly_chart(fig_fair, width='stretch')
 
 except Exception as e:
     st.error(f"No se pudo calcular el precio justo: {e}")
 
 
+import streamlit as st
+import yfinance as yf
+import plotly.graph_objects as go
+import pandas as pd
+import numpy as np
 
+st.title("Simulación de Precios de Acciones con GBM")
 
+# Inputs del usuario
+symbol = st.text_input("Símbolo de la acción", "AAPL")
+start_date = st.date_input("Fecha de inicio", value=pd.to_datetime("2022-01-01"))
 
+# Descargar datos
+df = yf.download(symbol, start=start_date)
+if df.empty or 'Close' not in df.columns:
+    st.error(f"No se pudieron obtener datos válidos para el símbolo '{symbol}'. Verifica el símbolo.")
+    st.stop()
+
+df.dropna(inplace=True)
+if df.empty:
+    st.error("No hay datos suficientes después de limpiar NaN.")
+    st.stop()
+
+# Añadir indicadores técnicos
+df['SMA_20'] = df['Close'].rolling(window=20).mean()
+df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()
+df['RSI'] = calculate_rsi(df['Close'], period=14)
+rolling_mean = df['Close'].rolling(window=20).mean()
+rolling_std = df['Close'].rolling(window=20).std()
+df['BB_upper'] = rolling_mean + 2 * rolling_std
+df['BB_lower'] = rolling_mean - 2 * rolling_std
+
+# === Detección de soportes y resistencias ===
+def detect_support_resistance(data, window=5):
+    lows = data['Low'].rolling(window=window*2+1, center=True).min() == data['Low']
+    highs = data['High'].rolling(window=window*2+1, center=True).max() == data['High']
+    supports = data[lows]['Low']
+    resistances = data[highs]['High']
+    return supports, resistances
+
+supports, resistances = detect_support_resistance(df, window=5)
+
+# === Mostrar resumen de soportes ===
+st.subheader("🔍 Análisis Técnico: Soportes Clave")
+if not supports.empty:
+    # Ordenar por fecha descendente y tomar los últimos 3
+    recent_supports = supports.tail(3)
+    support_levels = sorted([round(level, 2) for level in recent_supports.values])
     
+    st.write("**Niveles de soporte recientes (ordenados):**")
+    for i, level in enumerate(support_levels, 1):
+        st.write(f"- Soporte {i}: **${level}**")
+    
+    # Promedio de soportes como referencia
+    avg_support = np.mean(support_levels)
+    current_price = df['Close'].iloc[-1]
+    st.metric("Precio actual", f"${current_price:.2f}")
+    st.metric("Soporte promedio reciente", f"${avg_support:.2f}")
+    
+    if current_price < avg_support * 1.02:
+        st.warning("⚠️ El precio está cerca o por debajo del soporte promedio.")
+    else:
+        st.success("✅ El precio está por encima del soporte promedio reciente.")
+else:
+    st.info("No se detectaron niveles claros de soporte con los parámetros actuales.")
+
+# === Separador visual ===
+st.markdown("---")
