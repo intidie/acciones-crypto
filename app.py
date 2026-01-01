@@ -1,11 +1,15 @@
 import streamlit as st
 import yfinance as yf
-import pandas_ta as pd
+import ta
 import plotly.graph_objects as go
 
-symbol = "LULU"
+symbol = "AAPL"
 df = yf.download(symbol, start="2022-01-01")
-df.dropna(inplace=True)
+df.dropna(subset=['Close'], inplace=True)
+
+if df.empty:
+    st.error("No se pudieron obtener datos para el símbolo especificado.")
+    st.stop()
 
 # Add technical indicators
 try:
@@ -21,6 +25,7 @@ except Exception as e:
 
 
 prices = df['Close']
+st.write(f"Length of df: {len(df)}, Length of prices: {len(prices)}")
 
 import numpy as np
 
@@ -35,7 +40,7 @@ def gbm(S0, mu, sigma, T, N):
     t = np.linspace(0, float(T), int(N))
     S = float(S0) * np.exp((float(mu) - 0.5 * float(sigma)**2) * t + float(sigma) * W)
     return np.array(S)
-paths = [gbm(float(prices.iloc[-1]), float(mu), float(sigma), 1, 252) for _ in range(1000)]
+paths = [gbm(prices.iloc[-1], mu, sigma, 1, 252) for _ in range(1000)]
 
 
 upper = np.percentile(paths, 95, axis=0)
