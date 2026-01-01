@@ -110,3 +110,139 @@ with st.expander("Ver todos los ratios disponibles"):
 
 # --- Notas finales ---
 st.info("Nota: Los ratios fundamentales provienen de Yahoo Finance. Algunos pueden no estar disponibles para ciertos activos o ser aproximados.")
+
+
+
+def calcular_precios_justos(symbol):
+    from yahooquery import Ticker
+    t = Ticker(symbol)
+    
+    # Datos fundamentales
+    try:
+        info = t.summary_detail[symbol]
+        fin_data = t.financial_data.get(symbol, {})
+        key_stats = t.key_stats.get(symbol, {})
+        income = t.income_statement(frequency='a', trailing=False)
+        cashflow = t.cash_flow(frequency='a', trailing=False)
+    except Exception as e:
+        st.warning(f"Error al obtener datos para {symbol}: {e}")
+        return None, None, None
+
+    shares_out = info.get('sharesOutstanding')
+    if not shares_out or shares_out <= 0:
+        return None, None, None
+
+    # --- 1. DCF simplificado (5 años, crecimiento constante) ---
+    fcf = None
+    try:
+        fcf_series = cashflow[cashflow['type'] == 'Free Cash Flow']['FreeCashFlow'].dropna()
+        if len(fcf_series) > 0:
+            fcf = fcf_series.iloc[0]  # Último FCF anual
+    except:
+        pass
+
+    fair_value_dcf = None
+    if fcf and fcf > 0:
+        try:
+            # Supuestos razonables (ajustables)
+            growth_rate = 0.03  # 3% perpetuo
+            discount_rate = 0.08  # 8% WACC estimado
+
+            # Proyección de 5 años
+            fcf_proj = [fcf * (1 + growth_rate)**i for i in range(1, 6)]
+            # Valor terminal (Gordon)
+            terminal_value = fcf_proj[-1] * (1 + growth_rate) / (discount_rate - growth_rate)
+            # VPN
+            pv_fcf = sum(fcf_proj[i] / (1 + discount_rate)**(i+1) for i in range(5))
+            pv_terminal = terminal_value / (1 + discount_rate)**5
+            equity_value = pv_fcf + pv_terminal
+            fair_value_dcf = equity_value / shares_out
+        except:
+            fair_value_dcf = None
+
+    # --- 2. DDM (Dividend Discount Model) ---
+    dividend = info.get('dividendRate')
+    fair_value_ddm = None
+    if dividend and dividend > 0:
+        try:
+            payout_growth = 0.02  # 2% crecimiento de dividendos
+            required_return = 0.08
+            next_div = dividend * (1 + payout_growth)
+            fair_value_ddm = next_div / (required_return - payout_growth)
+        except:
+            fair_value_ddm = None
+
+    # --- 3. P/E relativo (usar promedio histórico de P/E) ---
+    trailing_pe = key_stats.get('trailingPE')
+    eps = info.get('epsTrailingTwelveMonths')
+    fair_value_pe = None
+    if trailing_pe and eps:
+        # Suponemos que el "precio justo" es cuando la acción vuelve a su P/E histórico promedio
+        # Aquí usamos el P/E actual como proxy (ideal: promedio 5 años, pero no siempre disponible)
+        try:
+            fair_value_pe = trailing_pe * eps
+        except:
+            fair_value_pe = None
+
+    return fair_value_dcf, fair_value_ddm, fair_value_pe
+
+
+
+    st.subheader("Precio Justo Estimado (Valor Intrínseco)")
+
+# Instalar yahooquery si no lo tienes: pip install yahooquery
+try:
+    fair_dcf, fair_ddm, fair_pe = calcular_precios_justos(symbol)
+    
+    # Mostrar en tarjetas
+    cols = st.columns(3)
+    with cols[0]:
+        if fair_dcf:
+            st.metric("DCF Estimado", f"${fair_dcf:,.2f}")
+        else:
+            st.metric("DCF Estimado", "N/A")
+    with cols[1]:
+        if fair_ddm:
+            st.metric("DDM (Dividendos)", f"${fair_ddm:,.2f}")
+        else:
+            st.metric("DDM", "N/A")
+    with cols[2]:
+        if fair_pe:
+            st.metric("P/E Relativo", f"${fair_pe:,.2f}")
+        else:
+            st.metric("P/E Relativo", "N/A")
+
+    # Precio actual
+    current_price = df['Close'].iloc[-1]
+    st.metric("Precio Actual", f"${current_price:,.2f}")
+
+    # Gráfico comparativo
+    fair_values = {
+        "Actual": current_price,
+        "DCF": fair_dcf,
+        "DDM": fair_ddm,
+        "P/E Relativo": fair_pe
+    }
+    fair_df = pd.DataFrame({
+        "Modelo": list(fair_values.keys()),
+        "Precio Justo": list(fair_values.values())
+    }).dropna()
+
+    if not fair_df.empty:
+        fig_fair = go.Figure()
+        fig_fair.add_trace(go.Bar(
+            x=fair_df["Modelo"],
+            y=fair_df["Precio Justo"],
+            marker_color=['blue', 'green', 'orange', 'red'][:len(fair_df)]
+        ))
+        fig_fair.update_layout(title="Comparación: Precio Actual vs. Precio Justo", yaxis_title="USD")
+        st.plotly_chart(fig_fair, use_container_width=True)
+
+except Exception as e:
+    st.error(f"No se pudo calcular el precio justo: {e}")
+
+
+
+
+
+    
