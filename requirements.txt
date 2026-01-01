@@ -1,8 +1,5 @@
-numpy
-pandas
-scipy
 yfinance
-ccxt
-pandas-ta
+pandas
+pandas_ta
 plotly
-streamlit
+ccxt

@@ -1,8 +1,8 @@
+import streamlit as st
 import yfinance as yf
 import pandas as pd
+import ta
 import plotly.graph_objects as go
-import ccxt
-import pandas_ta as ta
 
 symbol = "LULU"
 df = yf.download(symbol, start="2022-01-01")
@@ -10,20 +10,14 @@ df.dropna(inplace=True)
 
 # Add technical indicators
 try:
-    df = ta.add_trend_ta(df, high="High", low="Low", close="Close")
-except:
-    pass
-try:
-    df = ta.add_momentum_ta(df, high="High", low="Low", close="Close")
-except:
-    pass
-try:
-    df = ta.add_volatility_ta(df, high="High", low="Low", close="Close")
-except:
-    pass
-try:
-    df = ta.add_others_ta(df, close="Close")
-except:
+    close_series = df['Close'].squeeze()  # Ensure 1D
+    df['SMA_20'] = ta.trend.sma_indicator(close_series, window=20)
+    df['EMA_12'] = ta.trend.ema_indicator(close_series, window=12)
+    df['RSI'] = ta.momentum.rsi(close_series, window=14)
+    df['BB_upper'] = ta.volatility.bollinger_hband(close_series, window=20)
+    df['BB_lower'] = ta.volatility.bollinger_lband(close_series, window=20)
+except Exception as e:
+    print(f"Error adding indicators: {e}")
     pass
 
 
