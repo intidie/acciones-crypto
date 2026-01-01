@@ -2,9 +2,15 @@ import streamlit as st
 import yfinance as yf
 import ta
 import plotly.graph_objects as go
+import pandas as pd
 
-symbol = "AAPL"
-df = yf.download(symbol, start="2022-01-01")
+st.title("Simulación de Precios de Acciones con GBM")
+
+# Inputs del usuario
+symbol = st.text_input("Símbolo de la acción", "AAPL")
+start_date = st.date_input("Fecha de inicio", value=pd.to_datetime("2022-01-01"))
+
+df = yf.download(symbol, start=start_date)
 df.dropna(subset=['Close'], inplace=True)
 
 if df.empty:
@@ -47,6 +53,13 @@ upper = np.percentile(paths, 95, axis=0)
 lower = np.percentile(paths, 5, axis=0)
 mean_path = np.mean(paths, axis=0)
 
+st.write("Simulación completada exitosamente")
 
-print("Simulation completed successfully")
+# Crear gráfico con Plotly
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=np.arange(len(mean_path)), y=mean_path, mode='lines', name='Camino Medio'))
+fig.add_trace(go.Scatter(x=np.arange(len(upper)), y=upper, mode='lines', name='Percentil 95', line=dict(dash='dash')))
+fig.add_trace(go.Scatter(x=np.arange(len(lower)), y=lower, mode='lines', name='Percentil 5', line=dict(dash='dash')))
+fig.update_layout(title=f"Simulación GBM para {symbol}", xaxis_title="Días", yaxis_title="Precio")
+st.plotly_chart(fig)
 
